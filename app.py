@@ -58,6 +58,8 @@ class AttendanceApp:
         self.camera = None
         self.camera_label = None
         self.classes_data = self.load_classes_data()
+        self.attendance_history = []  # List untuk menyimpan history absensi
+        self.sidebar_open = False     # Status sidebar (awalnya tertutup)
         
         # Inisialisasi database handler
         self.db_handler = DatabaseHandler()
@@ -361,13 +363,18 @@ class AttendanceApp:
         
     def open_attendance_view(self, class_code, class_name, meeting_number):
         """
-        Membuka tampilan kamera untuk absensi.
+        Membuka tampilan kamera untuk absensi dengan sidebar yang dapat dibuka/tutup.
+        Perbaikan layout untuk mencegah kamera menutupi bagian bawah.
         
         Args:
             class_code: Kode kelas yang dipilih
             class_name: Nama kelas yang dipilih
             meeting_number: Nomor pertemuan
         """
+        # Reset history absensi untuk sesi baru
+        self.attendance_history = []
+        self.sidebar_open = False  # Status sidebar (awalnya tertutup)
+        
         # Sembunyikan tampilan utama
         self.main_frame.pack_forget()
         
@@ -412,26 +419,88 @@ class AttendanceApp:
         # Mulai timer untuk tampilan waktu pada tampilan absensi
         self.update_attendance_clock()
         
-        # Frame untuk konten utama yang berisi kamera dan tombol
-        main_content = tk.Frame(self.attendance_frame, bg=self.bg_color)
-        main_content.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # ------- PENGATURAN LAYOUT UTAMA -------
+        # Layout diubah untuk menggunakan grid agar lebih terkontrol
         
-        # Atur layout agar camera frame tidak meregang menutupi semua
-        main_content.grid_rowconfigure(0, weight=1)  # Baris kamera mengambil sisa ruang
-        main_content.grid_rowconfigure(1, weight=0)  # Baris tombol ukuran tetap
-        main_content.grid_columnconfigure(0, weight=1)  # Kolom mengambil semua ruang horizontal
+        # Frame untuk konten utama (kamera + sidebar) dengan tinggi terbatas
+        self.main_content = tk.Frame(self.attendance_frame, bg=self.bg_color)
+        self.main_content.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Frame untuk kamera dengan tinggi tetap
-        self.camera_frame = tk.Frame(main_content, bg="black", height=400)
-        self.camera_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        self.camera_frame.pack_propagate(False)  # Mencegah ukuran frame berubah oleh kontennya
+        # Gunakan grid untuk layout yang lebih terkontrol
+        self.main_content.grid_columnconfigure(0, weight=1)  # Kolom kamera
+        self.main_content.grid_columnconfigure(1, weight=0)  # Kolom sidebar (ukuran tetap)
+        self.main_content.grid_rowconfigure(0, weight=1)     # Baris konten utama
+        
+        # Frame untuk kamera dengan tinggi maksimum yang terbatas
+        self.camera_container = tk.Frame(self.main_content, bg=self.bg_color)
+        self.camera_container.grid(row=0, column=0, sticky="nsew")
+        
+        # Tombol untuk membuka/menutup sidebar
+        self.toggle_button = tk.Button(
+            self.camera_container,
+            text="≫ Tampilkan Riwayat",
+            font=('Helvetica', 12),
+            bg=self.secondary_color,
+            fg="white",
+            padx=10,
+            pady=5,
+            command=self.toggle_sidebar
+        )
+        self.toggle_button.pack(anchor="ne", padx=10, pady=5)
+        
+        # Frame kamera dengan tinggi tetap
+        camera_height = 380  # Tetapkan tinggi tetap
+        self.camera_frame = tk.Frame(self.camera_container, bg="black", height=camera_height)
+        self.camera_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.camera_frame.pack_propagate(False)  # Mencegah frame menyesuaikan ukuran label
         
         self.camera_label = tk.Label(self.camera_frame, bg="black")
         self.camera_label.pack(fill=tk.BOTH, expand=True)
         
-        # Frame untuk tombol-tombol
-        self.attendance_button_frame = tk.Frame(main_content, bg=self.bg_color, height=50)
-        self.attendance_button_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        # Sidebar untuk riwayat absensi (hidden awalnya)
+        sidebar_width = 250
+        self.sidebar = tk.Frame(self.main_content, bg=self.bg_color, width=sidebar_width)
+        self.sidebar.grid(row=0, column=1, sticky="ns")
+        self.sidebar.grid_remove()  # Sembunyikan sidebar awalnya
+        self.sidebar.grid_propagate(False)  # Tetapkan ukuran sidebar
+        
+        # Label untuk histori absensi
+        history_label = tk.Label(
+            self.sidebar,
+            text="Riwayat Absensi:",
+            font=('Helvetica', 14, 'bold'),
+            bg=self.bg_color,
+            fg=self.text_color
+        )
+        history_label.pack(anchor="w", pady=(10, 5), padx=10)
+        
+        # Listbox untuk menampilkan histori absensi
+        self.history_listbox = tk.Listbox(
+            self.sidebar,
+            font=('Helvetica', 12),
+            bg="white",
+            fg=self.text_color,
+            height=15,
+            width=28
+        )
+        self.history_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Frame untuk status absensi - dipindahkan di atas tombol-tombol
+        self.status_frame = tk.Frame(self.attendance_frame, bg=self.bg_color, height=40)
+        self.status_frame.pack(fill=tk.X, pady=5)
+        
+        self.attendance_status_label = tk.Label(
+            self.status_frame,
+            text="Menunggu pengenalan wajah...",
+            font=('Helvetica', 12, 'bold'),
+            bg=self.bg_color,
+            fg=self.text_color
+        )
+        self.attendance_status_label.pack()
+        
+        # Frame untuk tombol-tombol - dipastikan berada di bawah
+        self.attendance_button_frame = tk.Frame(self.attendance_frame, bg=self.bg_color, height=50)
+        self.attendance_button_frame.pack(fill=tk.X, pady=10, side=tk.BOTTOM)
         
         # Tombol Kembali
         self.back_button = tk.Button(
@@ -445,32 +514,7 @@ class AttendanceApp:
             command=self.close_attendance_view
         )
         self.back_button.pack(side=tk.LEFT, padx=20)
-        
-        # Tombol Export Data
-        self.export_button = tk.Button(
-            self.attendance_button_frame,
-            text="EXPORT DATA",
-            font=('Helvetica', 14),
-            bg=self.secondary_color,  # Biru
-            fg="white",
-            padx=20,
-            pady=10,
-            command=lambda: self.export_attendance_data(class_code, meeting_number)
-        )
-        self.export_button.pack(side=tk.RIGHT, padx=20)
-        
-        # Frame untuk status absensi
-        self.status_frame = tk.Frame(self.attendance_frame, bg=self.bg_color, height=40)
-        self.status_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=10)
-        
-        self.attendance_status_label = tk.Label(
-            self.status_frame,
-            text="Menunggu pengenalan wajah...",
-            font=('Helvetica', 12),
-            bg=self.bg_color,
-            fg=self.text_color
-        )
-        self.attendance_status_label.pack()
+
         
         # Simpan informasi kelas aktif
         self.active_class_code = class_code
@@ -478,7 +522,26 @@ class AttendanceApp:
         
         # Mulai kamera dan pengenalan wajah
         self.start_camera()
-        
+
+    def toggle_sidebar(self):
+        """Toggle sidebar untuk menampilkan atau menyembunyikan riwayat absensi."""
+        if self.sidebar_open:
+            # Tutup sidebar
+            self.sidebar.grid_remove()
+            self.toggle_button.config(text="≫ Tampilkan Riwayat")
+            self.sidebar_open = False
+        else:
+            # Buka sidebar
+            self.sidebar.grid()
+            self.toggle_button.config(text="≪ Sembunyikan Riwayat")
+            self.sidebar_open = True
+            
+            # Update isi listbox
+            self.history_listbox.delete(0, tk.END)
+            for entry in self.attendance_history:
+                self.history_listbox.insert(tk.END, entry)
+
+
     def update_attendance_clock(self):
         """Update tampilan jam pada view absensi."""
         if hasattr(self, 'time_label') and self.time_label.winfo_exists():
@@ -554,39 +617,66 @@ class AttendanceApp:
             student_id: ID mahasiswa
             name: Nama mahasiswa
         """
-        now = datetime.now().strftime("%H:%M:%S")
-        status_text = f"Absensi tercatat: {name} ({student_id}) pada {now}"
+        # Dapatkan data absensi terkini dari database untuk siswa ini
+        data = self.db_handler.get_attendance_data(self.active_class_code, self.active_meeting)
+        
+        # Filter data untuk siswa yang sesuai
+        student_records = [item for item in data if item['nim'] == student_id]
+        
+        # Tentukan pesan status berdasarkan data
+        if student_records:
+            # Ambil record terakhir
+            latest_record = student_records[-1]
+            timestamp = latest_record['timestamp']
+            
+            # Format timestamp untuk tampilan
+            formatted_time = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").strftime("%H:%M:%S")
+            formatted_date = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y")
+            
+            # Pesan status untuk siswa yang sudah absen
+            status_text = f"{name} ({student_id}) sudah melakukan absensi pada {formatted_date} jam {formatted_time}"
+            status_color = "#006400"  # Dark green
+        else:
+            # Pesan untuk siswa yang baru saja dikenali tapi belum masuk ke database
+            now = datetime.now()
+            formatted_time = now.strftime("%H:%M:%S")
+            formatted_date = now.strftime("%d/%m/%Y")
+            
+            status_text = f"Mencatat absensi: {name} ({student_id}) pada {formatted_date} jam {formatted_time}"
+            status_color = "#4CAF50"  # Green
         
         # Update status label
         if hasattr(self, 'attendance_status_label') and self.attendance_status_label.winfo_exists():
-            self.attendance_status_label.config(text=status_text, fg="green")
+            self.attendance_status_label.config(text=status_text, fg=status_color)
+        
+        # Tambahkan entry status ke history absensi jika ada
+        if hasattr(self, 'attendance_history'):
+            # Cek apakah mahasiswa ini sudah ada di history terbaru
+            student_in_history = False
+            for entry in self.attendance_history[:5]:  # Cek 5 entry terakhir
+                if student_id in entry:
+                    student_in_history = True
+                    break
             
+            # Jika belum ada di history terbaru, tambahkan
+            if not student_in_history:
+                # Tambahkan entry baru ke awal list (untuk menampilkan yang terbaru di atas)
+                now = datetime.now().strftime("%H:%M:%S")
+                self.attendance_history.insert(0, f"{now} - {name} ({student_id})")
+                
+                # Batasi history ke 10 entry terakhir
+                if len(self.attendance_history) > 10:
+                    self.attendance_history.pop()
+                
+                # Update tampilan history jika sidebar terbuka
+                if self.sidebar_open and hasattr(self, 'history_listbox') and self.history_listbox.winfo_exists():
+                    self.history_listbox.delete(0, tk.END)
+                    for entry in self.attendance_history:
+                        self.history_listbox.insert(tk.END, entry)
+        
         # Log absensi
-        logger.info(f"Attendance recorded: {student_id} ({name})")
-        
-    def export_attendance_data(self, class_code, meeting):
-        """
-        Mengekspor data absensi untuk kelas dan pertemuan tertentu.
-        
-        Args:
-            class_code: Kode kelas
-            meeting: Nomor pertemuan
-        """
-        try:
-            success, filepath = self.db_handler.export_attendance_to_csv(class_code, meeting)
-            
-            if success and filepath:
-                messagebox.showinfo(
-                    "Export Berhasil", 
-                    f"Data absensi berhasil diekspor ke:\n{filepath}"
-                )
-            else:
-                messagebox.showerror(
-                    "Export Gagal", 
-                    "Tidak dapat mengekspor data absensi."
-                )
-        except Exception as e:
-            messagebox.showerror("Error", f"Terjadi kesalahan: {str(e)}")
+        logger.info(f"Attendance status updated: {student_id} ({name})")
+
         
     def close_camera(self):
         """Menutup kamera."""
