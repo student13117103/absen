@@ -28,13 +28,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class FaceDetector:
-    def __init__(self, encodings_path="models/encodings.pkl", detection_method="hog"):
+    def __init__(self, encodings_path="models/encodings.pkl", detection_method="hog", db_handler=None):
         """
         Initialize the face detector.
         
         Args:
             encodings_path (str): Path to the pickled encodings file
             detection_method (str): Method for face detection ('hog' or 'cnn')
+            db_handler: Database handler untuk menyimpan hasil absensi
         """
         self.encodings_path = encodings_path
         self.detection_method = detection_method
@@ -53,6 +54,13 @@ class FaceDetector:
         self.box_color = (0, 255, 0)     # Green bounding box for matches
         self.unknown_color = (0, 0, 255) # Red bounding box for unknown faces
         
+        # Database handler
+        self.db_handler = db_handler
+        
+        # Class and meeting info (akan diset saat mulai kamera)
+        self.active_class_code = None
+        self.active_meeting = None
+        
     def load_encodings(self):
         """Load the known face encodings from the pickle file."""
         try:
@@ -64,6 +72,18 @@ class FaceDetector:
         except Exception as e:
             logger.error(f"Error loading encodings: {str(e)}")
             return {"encodings": [], "ids": [], "names": []}
+            
+    def set_active_class(self, class_code, meeting):
+        """
+        Set kelas dan pertemuan aktif untuk absensi.
+        
+        Args:
+            class_code (str): Kode kelas (misalnya 'IF101')
+            meeting (int): Nomor pertemuan
+        """
+        self.active_class_code = class_code
+        self.active_meeting = meeting
+        logger.info(f"Set active class to {class_code}, meeting {meeting}")
             
     def recognize_faces(self, frame):
         """
@@ -110,7 +130,7 @@ class FaceDetector:
             matches = face_recognition.compare_faces(
                 self.data["encodings"], 
                 face_encoding, 
-                tolerance=0.6  # Lower value = more strict matching
+                tolerance=0.5  # Lower value = more strict matching
             )
             
             name = "Unknown"
@@ -149,6 +169,10 @@ class FaceDetector:
                             self.last_recognition_time[student_id] = current_time
                             
                             logger.info(f"Recognized: {name} (ID: {student_id}) with confidence: {confidence:.2f}")
+                            
+                            # Catat absensi ke database jika ada database handler dan kelas aktif
+                            if self.db_handler and self.active_class_code and self.active_meeting:
+                                self.record_attendance_to_db(student_id, name)
             
             # Draw bounding box and label
             cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
@@ -163,7 +187,42 @@ class FaceDetector:
         # Return the processed frame and the list of recognized people
         return frame, list(zip(recognized_ids, recognized_names))
         
-    def start_camera(self, camera_index=0, window_name="Face Recognition", callback=None):
+    def record_attendance_to_db(self, student_id, name):
+        """
+        Mencatat absensi ke database.
+        
+        Args:
+            student_id (str): ID mahasiswa
+            name (str): Nama mahasiswa
+        
+        Returns:
+            tuple: (success, message) dari operasi database
+        """
+        try:
+            if self.db_handler:
+                success, message = self.db_handler.record_attendance(
+                    self.active_class_code, 
+                    student_id, 
+                    name, 
+                    self.active_meeting
+                )
+                
+                if success:
+                    logger.info(f"Berhasil mencatat absensi ke database: {student_id} ({name})")
+                else:
+                    logger.error(f"Gagal mencatat absensi ke database: {message}")
+                    
+                return success, message
+            else:
+                logger.warning("Database handler tidak tersedia, absensi tidak dicatat")
+                return False, "Database handler tidak tersedia"
+                
+        except Exception as e:
+            logger.error(f"Error saat mencatat absensi ke database: {str(e)}")
+            return False, str(e)
+        
+    def start_camera(self, camera_index=0, window_name="Face Recognition", callback=None, 
+                     class_code=None, meeting=None):
         """
         Start the camera feed and face recognition process.
         
@@ -171,8 +230,14 @@ class FaceDetector:
             camera_index: Index of the camera to use
             window_name: Name of the display window
             callback: Function to call when a face is recognized (for attendance)
+            class_code: Kode kelas untuk absensi
+            meeting: Nomor pertemuan
         """
         try:
+            # Set active class and meeting if provided
+            if class_code and meeting:
+                self.set_active_class(class_code, meeting)
+                
             # Initialize the camera
             logger.info(f"Starting camera feed from index {camera_index}")
             camera = cv2.VideoCapture(camera_index)
@@ -227,10 +292,20 @@ class FaceDetector:
 
 # Example usage when run as standalone script
 if __name__ == "__main__":
+    # Import database handler
+    from database_handler import DatabaseHandler
+    
+    # Create database handler
+    db = DatabaseHandler()
+    
     # Define a simple callback function to demonstrate functionality
     def attendance_callback(student_id, name):
         print(f"Attendance recorded for: {name} (ID: {student_id})")
     
-    # Create and start the face detector
-    detector = FaceDetector()
-    detector.start_camera(callback=attendance_callback)
+    # Create and start the face detector with database integration
+    detector = FaceDetector(db_handler=db)
+    detector.start_camera(
+        callback=attendance_callback,
+        class_code="IF101",
+        meeting=1
+    )

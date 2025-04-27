@@ -16,9 +16,10 @@ from datetime import datetime
 from PIL import Image, ImageTk
 import cv2
 
-# Import modul face detector
+# Import modul face detector dan database handler
 sys.path.append('src')
 from face_detector import FaceDetector
+from database_handler import DatabaseHandler
 
 # Konfigurasi logging
 logging.basicConfig(
@@ -57,6 +58,10 @@ class AttendanceApp:
         self.camera = None
         self.camera_label = None
         self.classes_data = self.load_classes_data()
+        
+        # Inisialisasi database handler
+        self.db_handler = DatabaseHandler()
+        logger.info("Database handler initialized")
         
         # Setup UI
         self.setup_ui()
@@ -344,7 +349,7 @@ class AttendanceApp:
         self.input_frame.destroy()
         
         # Buka tampilan absensi
-        self.open_attendance_view(class_code, class_name, meeting_number)
+        self.open_attendance_view(class_code, class_name, int(meeting_number))
         
     def back_to_main(self):
         """Kembali ke tampilan utama."""
@@ -441,6 +446,19 @@ class AttendanceApp:
         )
         self.back_button.pack(side=tk.LEFT, padx=20)
         
+        # Tombol Export Data
+        self.export_button = tk.Button(
+            self.attendance_button_frame,
+            text="EXPORT DATA",
+            font=('Helvetica', 14),
+            bg=self.secondary_color,  # Biru
+            fg="white",
+            padx=20,
+            pady=10,
+            command=lambda: self.export_attendance_data(class_code, meeting_number)
+        )
+        self.export_button.pack(side=tk.RIGHT, padx=20)
+        
         # Frame untuk status absensi
         self.status_frame = tk.Frame(self.attendance_frame, bg=self.bg_color, height=40)
         self.status_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=10)
@@ -453,6 +471,10 @@ class AttendanceApp:
             fg=self.text_color
         )
         self.attendance_status_label.pack()
+        
+        # Simpan informasi kelas aktif
+        self.active_class_code = class_code
+        self.active_meeting = meeting_number
         
         # Mulai kamera dan pengenalan wajah
         self.start_camera()
@@ -473,8 +495,11 @@ class AttendanceApp:
         """Memulai kamera dan pengenalan wajah."""
         self.is_camera_active = True
         
-        # Inisialisasi face detector
-        self.detector = FaceDetector()
+        # Inisialisasi face detector dengan database handler
+        self.detector = FaceDetector(db_handler=self.db_handler)
+        
+        # Set kelas aktif di detector
+        self.detector.set_active_class(self.active_class_code, self.active_meeting)
         
         # Inisialisasi kamera
         self.camera = cv2.VideoCapture(0)  # 0 = default camera
@@ -496,10 +521,10 @@ class AttendanceApp:
                 # Proses frame untuk pengenalan wajah
                 processed_frame, recognized_people = self.detector.recognize_faces(frame)
                 
-                # Jika ada orang yang dikenali, catat absensi
+                # Jika ada orang yang dikenali, update status UI
                 if recognized_people:
                     for student_id, name in recognized_people:
-                        self.record_attendance(student_id, name)
+                        self.update_attendance_status(student_id, name)
                 
                 # Konversi frame OpenCV ke format yang dapat ditampilkan oleh Tkinter
                 cv2image = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
@@ -521,17 +546,14 @@ class AttendanceApp:
                 logger.error("Error membaca frame dari kamera")
                 self.close_camera()
                 
-    def record_attendance(self, student_id, name):
+    def update_attendance_status(self, student_id, name):
         """
-        Mencatat absensi untuk mahasiswa yang dikenali.
+        Update tampilan status absensi pada UI.
         
         Args:
             student_id: ID mahasiswa
             name: Nama mahasiswa
         """
-        # TODO: Integrasi dengan sistem manajemen absensi
-        
-        # Untuk sementara, cukup tampilkan informasi
         now = datetime.now().strftime("%H:%M:%S")
         status_text = f"Absensi tercatat: {name} ({student_id}) pada {now}"
         
@@ -541,6 +563,30 @@ class AttendanceApp:
             
         # Log absensi
         logger.info(f"Attendance recorded: {student_id} ({name})")
+        
+    def export_attendance_data(self, class_code, meeting):
+        """
+        Mengekspor data absensi untuk kelas dan pertemuan tertentu.
+        
+        Args:
+            class_code: Kode kelas
+            meeting: Nomor pertemuan
+        """
+        try:
+            success, filepath = self.db_handler.export_attendance_to_csv(class_code, meeting)
+            
+            if success and filepath:
+                messagebox.showinfo(
+                    "Export Berhasil", 
+                    f"Data absensi berhasil diekspor ke:\n{filepath}"
+                )
+            else:
+                messagebox.showerror(
+                    "Export Gagal", 
+                    "Tidak dapat mengekspor data absensi."
+                )
+        except Exception as e:
+            messagebox.showerror("Error", f"Terjadi kesalahan: {str(e)}")
         
     def close_camera(self):
         """Menutup kamera."""
@@ -562,14 +608,54 @@ class AttendanceApp:
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
     def sync_data(self):
-        """Sinkronisasi data absensi."""
-        # TODO: Implementasi sinkronisasi data
+        """
+        Sinkronisasi data absensi yang memiliki status 'pending'.
+        """
+        # Untuk prototype, kita hanya akan mengubah status semua record menjadi 'success'
+        # Di implementasi nyata, di sini akan ada kode untuk sinkronisasi dengan server
         
-        # Untuk sementara, tampilkan pesan
-        self.status_label.config(text="Sinkronisasi data... (belum diimplementasikan)")
-        
-        # Reset pesan setelah beberapa detik
-        self.root.after(3000, lambda: self.status_label.config(text="Siap untuk absensi"))
+        try:
+            # Dapatkan semua kelas yang ada di classes.json
+            class_codes = [cls["class_code"] for cls in self.classes_data["classes"]]
+            
+            total_updated = 0
+            
+            for class_code in class_codes:
+                # Ambil semua data absensi untuk kelas
+                data = self.db_handler.get_attendance_data(class_code)
+                
+                # Filter record dengan status 'pending'
+                pending_ids = [item['id'] for item in data if item['status'] == 'pending']
+                
+                if pending_ids:
+                    # Update status menjadi 'success'
+                    self.db_handler.update_attendance_status(class_code, pending_ids, 'success')
+                    total_updated += len(pending_ids)
+            
+            # Tampilkan pesan status
+            if total_updated > 0:
+                self.status_label.config(
+                    text=f"Sinkronisasi selesai: {total_updated} record berhasil disinkronkan",
+                    fg="green"
+                )
+            else:
+                self.status_label.config(
+                    text="Tidak ada data baru untuk disinkronkan",
+                    fg=self.text_color
+                )
+                
+            # Reset pesan setelah beberapa detik
+            self.root.after(5000, lambda: self.status_label.config(
+                text="Siap untuk absensi",
+                fg=self.text_color
+            ))
+            
+        except Exception as e:
+            logger.error(f"Error saat sinkronisasi data: {str(e)}")
+            self.status_label.config(
+                text=f"Error saat sinkronisasi: {str(e)}",
+                fg="red"
+            )
         
     def on_closing(self):
         """Handler saat aplikasi ditutup."""
