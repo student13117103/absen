@@ -1,0 +1,34 @@
+{
+    "classes": [
+      {
+        "id": "1",
+        "class_code": "IF101",
+        "class_name": "Algoritma dan Pemrograman",
+        "pin": "1234"
+      },
+      {
+        "id": "2",
+        "class_code": "IF102",
+        "class_name": "Struktur Data",
+        "pin": "2345"
+      },
+      {
+        "id": "3",
+        "class_code": "IF103",
+        "class_name": "Basis Data",
+        "pin": "3456"
+      },
+      {
+        "id": "4",
+        "class_code": "IF104",
+        "class_name": "Pemrograman Web",
+        "pin": "4567"
+      },
+      {
+        "id": "5",
+        "class_code": "IF105",
+        "class_name": "Kecerdasan Buatan",
+        "pin": "5678"
+      }
+    ]
+  }
