@@ -7,6 +7,7 @@ sudo apt-get install -y python3-dev python3-pip
 sudo apt-get install -y libgtk-3-dev
 sudo apt-get install -y libboost-all-dev
 sudo apt-get install -y python3-pil python3-pil.imagetk  # Untuk GUI
+sudo apt install libxcb-xinerama0
 
 ```
 
@@ -30,6 +31,11 @@ source env/bin/activate
 
 # python depedencies
 
+## python gui
+```
+pip install PyQt5
+```
+
 ## Menginstal dlib (dependensi utama face_recognition)
 ```bash
 pip install dlib
@@ -46,10 +52,11 @@ pip install git+https://github.com/ageitgey/face_recognition_models
 ```bash
 pip install opencv-python
 pip install sqlite3
+pip install tabulate
 ```
 ## all install
 ```bash
-pip install dlib face_recognition opencv-python sqlite3
+pip install dlib face_recognition opencv-python sqlite3 tabulate
 ```
 # requirement
 ## create
